@@ -332,10 +332,17 @@ void* worker_thread(void* args)
         char local_filename[512];
         size_t read;
         char* line;
-        size_t len = 0;
+        size_t len;
+        int burst_index = 0;
 
         sprintf(local_filename, "./%s-%d.txt", infile, thread_index);
-        FILE* fp = fopen(local_filename, "cr");
+
+        // Create if does not exists
+        FILE* fp = fopen(local_filename, "ab");
+        fclose(fp);
+
+        // Open it to read
+        fp = fopen(local_filename, "rb");
 
         if (fp == NULL)
         {
@@ -344,11 +351,30 @@ void* worker_thread(void* args)
         }
 
         // Read from the file
-        while ((read = getline(&line, &len, fp)) != -1) {
-            printf("Retrieved line of length %zu:\n", read);
-            printf("%s", line);
+        while ((read = getline(&line, &len, fp)) != -1) 
+        {
+            char* token1 = strtok(line, " ");
+            char* token2 = strtok(NULL, " ");
+            
+            burst_struct burst;
+
+            // Randomize the burst
+            burst.burst_index = burst_index;
+            burst.thread_index = thread_index;
+            burst.inter_arrival_time = atoi(token1);
+            burst.length_ms = atoi(token2);
+
+            pthread_mutex_lock(&rq_mutex);
+            insert(&burst);
+            pthread_mutex_unlock(&rq_mutex);
+
+            custom_sleep(burst.length_ms);
+            custom_sleep(burst.inter_arrival_time);
+
+            burst_index++;
         }
 
+        printf("hulooo\n");
 
         fclose(fp);
     }
