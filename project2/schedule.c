@@ -228,7 +228,7 @@ int select_burst_by_algorithm()
 
 void register_statistics(burst_struct* burst)
 {
-
+    
 }
 
 int random_exp_dist(int minimum, int mean)
@@ -440,7 +440,7 @@ void* server_thread(void* args)
             custom_sleep(10);
 
             pthread_mutex_lock(&active_mutex);
-            schutdown_scheduler = (N == num_finished);
+            schutdown_scheduler = (N == num_finished) && (root_node == NULL);
             pthread_mutex_unlock(&active_mutex);
 
         } while (success == 0 && !schutdown_scheduler);
@@ -448,7 +448,7 @@ void* server_thread(void* args)
         // Do not print in case of shutdown
         if (schutdown_scheduler)
             break;
-
+        
         // Print the consumed burst
         printf("Consumed: "); print_burst(&burst); printf("\n\n");
 
