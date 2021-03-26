@@ -374,8 +374,6 @@ void* worker_thread(void* args)
             burst_index++;
         }
 
-        printf("hulooo\n");
-
         fclose(fp);
     }
     else // Generate randomly
