@@ -53,11 +53,18 @@ pthread_mutex_t rq_mutex;
 queue_node* root_node;
 size_t rq_size = 0;
 
+void print_burst(burst_struct* burst)
+{
+    // printf("(T=%d, B=%d, L=%d, A=%d) ", burst->thread_index, burst->burst_index, burst->length_ms, burst->inter_arrival_time);
+
+    printf("(T=%d, L=%d, A=%d) ", burst->thread_index, burst->length_ms, burst->inter_arrival_time);
+}
+
 void print_queue(int index)
 {
     int pass = 0;
 
-    printf("[%d]", index);
+    printf("[consume index %d]\n", index);
 
     if (!pass)
     {
@@ -71,14 +78,14 @@ void print_queue(int index)
 
             while (current_node != NULL)
             {
-                printf("(T=%d, B=%d, L=%d) ", current_node->burst.thread_index, current_node->burst.burst_index, current_node->burst.length_ms);
-
+                
+                print_burst(&current_node->burst);
                 current_node = current_node->next;
             }
         }
     }
 
-    printf("\n\n");
+    printf("\n");
 }
 
 int select_burst_by_algorithm()
@@ -248,7 +255,7 @@ int consume(burst_struct* burst, int index) // This consume method is non blocki
     return 1;
 }
 
-void* worker_thread(void* args) 
+void* worker_thread(void* args)
 {
     int thread_index = *((int*) args);
 
@@ -273,6 +280,7 @@ void* worker_thread(void* args)
         insert(&burst);
         pthread_mutex_unlock(&rq_mutex);
 
+        custom_sleep(burst.length_ms);
         custom_sleep(burst.inter_arrival_time);
     }
 
@@ -313,7 +321,8 @@ void* server_thread(void* args)
             custom_sleep(10);
         } while (success == 0);
 
-        printf("T=%d, B=%d, arrival=%d, length=%d\n", burst.thread_index, burst.burst_index, burst.inter_arrival_time, burst.length_ms);
+        // Print the consumed burst
+        printf("Consumed: "); print_burst(&burst); printf("\n\n");
 
         // Simulate execution by sleeping
         custom_sleep(burst.length_ms);
