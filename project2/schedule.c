@@ -6,6 +6,8 @@
 #include <sys/time.h>
 #include <math.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define ALGO_INVALID -1
 #define ALGO_FCFS 0
@@ -43,11 +45,17 @@ int avgB;
 int minA;
 int avgA;
 
+// Other 
+pthread_t worker_tids[N_MAX];
+int thread_indexes[N_MAX];
+
 // Runqueue
 int vruntime[N_MAX];
 int last_burst_index[N_MAX];
 
 pthread_mutex_t rq_mutex;
+pthread_mutex_t active_mutex;
+int num_finished;
 
 queue_node* root_node;
 size_t rq_size = 0;
@@ -65,6 +73,8 @@ void print_queue(int index)
 
     if (!pass)
     {
+        printf("num fin=%d\n", num_finished);
+
         if (algorithm_type == ALGO_VRUNTIME)
         {
             for (size_t thread_index = 1; thread_index <= N; thread_index++)
@@ -317,37 +327,66 @@ void* worker_thread(void* args)
 {
     int thread_index = *((int*) args);
 
-    for (size_t burst_index = 0; burst_index < burst_count; burst_index++)
+    if (generate_randomly == 0) // Read from file
     {
-        burst_struct burst;
+        char local_filename[512];
+        size_t read;
+        char* line;
+        size_t len = 0;
 
-        if (generate_randomly) // Generate random bursts
+        sprintf(local_filename, "./%s-%d.txt", infile, thread_index);
+        FILE* fp = fopen(local_filename, "cr");
+
+        if (fp == NULL)
         {
+            printf("\tInternal Error: Cannot open/create file '%s'\n", local_filename);
+            exit(-1);
+        }
+
+        // Read from the file
+        while ((read = getline(&line, &len, fp)) != -1) {
+            printf("Retrieved line of length %zu:\n", read);
+            printf("%s", line);
+        }
+
+
+        fclose(fp);
+    }
+    else // Generate randomly
+    {
+        for (size_t burst_index = 0; burst_index < burst_count; burst_index++)
+        {
+            burst_struct burst;
+
             // Randomize the burst
             burst.burst_index = burst_index;
             burst.thread_index = thread_index;
             burst.inter_arrival_time = random_exp_dist(minA, avgA);
             burst.length_ms = random_exp_dist(minB, avgB);
-        }
-        else // Read from file
-        {
-            // TODO
-        }
 
-        pthread_mutex_lock(&rq_mutex);
-        insert(&burst);
-        pthread_mutex_unlock(&rq_mutex);
+            pthread_mutex_lock(&rq_mutex);
+            insert(&burst);
+            pthread_mutex_unlock(&rq_mutex);
 
-        custom_sleep(burst.length_ms);
-        custom_sleep(burst.inter_arrival_time);
+            custom_sleep(burst.length_ms);
+            custom_sleep(burst.inter_arrival_time);
+        }
     }
+
+    pthread_mutex_lock(&active_mutex);
+    num_finished += 1;
+    pthread_mutex_unlock(&active_mutex);
 
     return NULL;
 }
 
 void* server_thread(void* args) 
-{    
-    for (size_t i = 0; i < burst_count * N; i++)
+{
+    int all_done = 0;
+    size_t i = 0;
+    int schutdown_scheduler = 0;
+
+    while (!schutdown_scheduler)
     {
         burst_struct burst;
         int success;
@@ -375,7 +414,16 @@ void* server_thread(void* args)
             pthread_mutex_unlock(&rq_mutex);
 
             custom_sleep(10);
-        } while (success == 0);
+
+            pthread_mutex_lock(&active_mutex);
+            schutdown_scheduler = (N == num_finished);
+            pthread_mutex_unlock(&active_mutex);
+
+        } while (success == 0 && !schutdown_scheduler);
+
+        // Do not print in case of shutdown
+        if (schutdown_scheduler)
+            break;
 
         // Print the consumed burst
         printf("Consumed: "); print_burst(&burst); printf("\n\n");
@@ -390,9 +438,15 @@ void* server_thread(void* args)
 
         // Simulate execution by sleeping
         custom_sleep(burst.length_ms);
+
+        i++;
     }
 
-    printf("Server is finshed\n");
+    // Wait for all w threads to finish
+    for (size_t i = 0; i < N; i++)
+        pthread_join(worker_tids[i], NULL);
+    
+    return NULL;
 }
 
 void parse_parameters(int argc, char const *argv[])
@@ -488,6 +542,7 @@ void parse_parameters(int argc, char const *argv[])
         vruntime[i] = 0;
     }
     root_node = NULL;
+    num_finished = 0;
     
 
     printf("Program will run for N=%d threads using algorithm '%s'.\n", N, argv[algorithm_index]);
@@ -505,10 +560,7 @@ int main(int argc, char const *argv[])
 
     // Init mutex and queue
     pthread_mutex_init(&rq_mutex, NULL);
-
-    // Worker threads
-    pthread_t worker_tids[N];
-    int thread_indexes[N];
+    pthread_mutex_init(&active_mutex, NULL);
 
     // Server thread (scheduler thread)
     pthread_t server_tid;
@@ -523,16 +575,13 @@ int main(int argc, char const *argv[])
     }
     
     pthread_create(&server_tid, NULL, server_thread, NULL);
-
-    // Wait for all threads to finish
-    for (size_t i = 0; i < N; i++)
-        pthread_join(worker_tids[i], NULL);
     
     pthread_join(server_tid, NULL);
     
 
     // Destroy ready queue
     pthread_mutex_destroy(&rq_mutex);
+    pthread_mutex_destroy(&active_mutex);
 
     printf("Simulation finished.\n");
     return 0;
