@@ -7,8 +7,6 @@
 #include <math.h>
 #include <time.h>
 
-#define NO_OF_BURSTS 3
-
 #define ALGO_INVALID -1
 #define ALGO_FCFS 0
 #define ALGO_SJF 1
@@ -39,6 +37,7 @@ int algorithm_type = ALGO_INVALID;
 char infile[256];
 
 int generate_randomly;
+int burst_count;
 int minB;
 int avgB;
 int minA;
@@ -55,19 +54,27 @@ size_t rq_size = 0;
 
 void print_burst(burst_struct* burst)
 {
-    // printf("(T=%d, B=%d, L=%d, A=%d) ", burst->thread_index, burst->burst_index, burst->length_ms, burst->inter_arrival_time);
+    printf("(T=%d, B=%d, L=%d, A=%d) ", burst->thread_index, burst->burst_index, burst->length_ms, burst->inter_arrival_time);
 
-    printf("(T=%d, L=%d, A=%d) ", burst->thread_index, burst->length_ms, burst->inter_arrival_time);
+    // printf("(T=%d, L=%d, A=%d) ", burst->thread_index, burst->length_ms, burst->inter_arrival_time);
 }
 
 void print_queue(int index)
 {
     int pass = 0;
 
-    printf("[consume index %d]\n", index);
-
     if (!pass)
     {
+        if (algorithm_type == ALGO_VRUNTIME)
+        {
+            for (size_t thread_index = 1; thread_index <= N; thread_index++)
+                printf("[T%ld=%d]", thread_index, vruntime[thread_index - 1]);
+            
+            printf("\n");
+        }
+
+        printf("[selected index %d]\n", index);
+
         if (root_node == NULL)
         {
             printf("null");
@@ -90,19 +97,35 @@ void print_queue(int index)
 
 int select_burst_by_algorithm()
 {
-    
-    int result = 0;
-
     if (algorithm_type == ALGO_FCFS)
     {
-        result = rq_size - 1; // actuaklly this is not correct change this
+        queue_node* current_node = root_node;
+        int current_index = 0;
+        int first_come_index = 0;
+
+        while (current_node != NULL)
+        {
+            int real_thread_index = current_node->burst.thread_index - 1;
+            int current_last_burst_index = last_burst_index[real_thread_index];
+            int current_burst_index = current_node->burst.burst_index;
+
+            if (current_burst_index == current_last_burst_index)
+            {
+                first_come_index = current_index;
+            }
+
+            current_node = current_node->next;
+            current_index += 1;
+        }
+
+        return first_come_index;
     }
     else if (algorithm_type == ALGO_SJF)
     {
         queue_node* current_node = root_node;
         int current_index = 0;
         int shortest_index = 0;
-        int shortest_time = 10000000;
+        unsigned int shortest_time = -1;
 
         while (current_node != NULL)
         {
@@ -123,14 +146,14 @@ int select_burst_by_algorithm()
             current_index += 1;
         }
 
-        result = shortest_index;
+        return shortest_index;
     }
     else if (algorithm_type == ALGO_PRIO)
     {
         queue_node* current_node = root_node;
         int current_index = 0;
         int priori_index = 0;
-        int priori_max = 10000000;
+        unsigned int priori_min = -1;
 
         while (current_node != NULL)
         {
@@ -140,10 +163,10 @@ int select_burst_by_algorithm()
 
             if (current_burst_index == current_last_burst_index)
             {
-                if (priori_max > current_node->burst.thread_index)
+                if (priori_min > current_node->burst.thread_index)
                 {
                     priori_index = current_index;
-                    priori_max = current_node->burst.thread_index;
+                    priori_min = current_node->burst.thread_index;
                 }
             }
 
@@ -151,11 +174,46 @@ int select_burst_by_algorithm()
             current_index += 1;
         }
 
-        result = priori_index;
+        return priori_index;
     }
+    else if (algorithm_type == ALGO_VRUNTIME)
+    {
+        // Warning increment the vruntime of a thred when consuming it in the server
 
-    // printf("consuming %d\n", result);
-    return result;
+        queue_node* current_node = root_node;
+        int current_index = 0;
+        unsigned int smallest_vruntime = -1;
+        int smallest_vruntime_index = 0;
+
+        while (current_node != NULL)
+        {
+            int real_thread_index = current_node->burst.thread_index - 1;
+            int current_last_burst_index = last_burst_index[real_thread_index];
+            int current_burst_index = current_node->burst.burst_index;
+
+            if (current_burst_index == current_last_burst_index)
+            {
+                int current_vruntime = vruntime[real_thread_index];
+
+                if (smallest_vruntime > current_vruntime)
+                {
+                    smallest_vruntime_index = current_index;
+                    smallest_vruntime = current_vruntime;
+                }
+            }
+
+            current_node = current_node->next;
+            current_index += 1;
+        }
+
+        return smallest_vruntime_index;
+    }
+    else 
+    {
+        // If the there is no algorithm then this scope will be invoked
+        printf("\tInternal error: No such algorithm! Removing first occurance.");
+        return 0;
+    }
 }
 
 void register_statistics(burst_struct* burst)
@@ -259,7 +317,7 @@ void* worker_thread(void* args)
 {
     int thread_index = *((int*) args);
 
-    for (size_t burst_index = 0; burst_index < NO_OF_BURSTS; burst_index++)
+    for (size_t burst_index = 0; burst_index < burst_count; burst_index++)
     {
         burst_struct burst;
 
@@ -288,10 +346,8 @@ void* worker_thread(void* args)
 }
 
 void* server_thread(void* args) 
-{
-    custom_sleep(10 * NO_OF_BURSTS * N);
-    
-    for (size_t i = 0; i < NO_OF_BURSTS * N; i++)
+{    
+    for (size_t i = 0; i < burst_count * N; i++)
     {
         burst_struct burst;
         int success;
@@ -310,7 +366,7 @@ void* server_thread(void* args)
             {
 
                 // increment the lasly changed burst index
-                last_burst_index[burst.thread_index] += 1;
+                last_burst_index[burst.thread_index - 1] += 1;
 
                 // register statistics while mutex is locked
                 register_statistics(&burst);
@@ -323,6 +379,14 @@ void* server_thread(void* args)
 
         // Print the consumed burst
         printf("Consumed: "); print_burst(&burst); printf("\n\n");
+
+        // Increment the vruntime while consuming the burst
+        if (algorithm_type == ALGO_VRUNTIME)
+        {
+            int real_thread_index = burst.thread_index - 1;
+
+            vruntime[real_thread_index] += (int) ((double) burst.length_ms) * (0.7 + 0.3 * burst.thread_index);
+        }
 
         // Simulate execution by sleeping
         custom_sleep(burst.length_ms);
@@ -389,10 +453,11 @@ void parse_parameters(int argc, char const *argv[])
 
         N = atoi(argv[1]);
 
-        minB = atoi(argv[2]);
-        avgB = atoi(argv[3]);
-        minA = atoi(argv[4]);
-        avgA = atoi(argv[5]);
+        burst_count = atoi(argv[2]);
+        minB = atoi(argv[3]);
+        avgB = atoi(argv[4]);
+        minA = atoi(argv[5]);
+        avgA = atoi(argv[6]);
 
         generate_randomly = 1;
     }
@@ -428,9 +493,9 @@ void parse_parameters(int argc, char const *argv[])
     printf("Program will run for N=%d threads using algorithm '%s'.\n", N, argv[algorithm_index]);
 
     if (generate_randomly)
-        printf("Burst generation will be randomized with parameters (%d, %d, %d, %d).\n", minB, avgB, minA, avgA);
+        printf("Burst generation will be randomized with parameters (%d, %d, %d, %d).\n\n", minB, avgB, minA, avgA);
     else 
-        printf("Burst generation will be from file '%s'.\n", infile);
+        printf("Burst generation will be from file '%s'.\n\n", infile);
 }
 
 int main(int argc, char const *argv[])
