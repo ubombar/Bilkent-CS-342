@@ -15,6 +15,8 @@
 #define ALGO_PRIO 2
 #define ALGO_VRUNTIME 3
 
+#define MAX_NUMBER 294967294
+
 #define N_MAX 10
 
 // structs and typedefs
@@ -48,17 +50,31 @@ int avgA;
 // Other 
 pthread_t worker_tids[N_MAX];
 int thread_indexes[N_MAX];
+int wait_times[N_MAX];
 
 // Runqueue
 int vruntime[N_MAX];
 int last_burst_index[N_MAX];
 
+int num_burst_executed  = 0;
+burst_struct selected_burst;
+int num_threads_consumed_exec = 0;
+
 pthread_mutex_t rq_mutex;
 pthread_mutex_t active_mutex;
+pthread_mutex_t exec_mutex;
 int num_finished;
 
 queue_node* root_node;
 size_t rq_size = 0;
+
+long get_time_ms()
+{
+    struct timeval current_timeval;
+    gettimeofday(&current_timeval, NULL);
+
+    return current_timeval.tv_sec * (long) 1000 + (long) (current_timeval.tv_usec / 1000);
+}
 
 void print_burst(burst_struct* burst)
 {
@@ -73,7 +89,14 @@ void print_queue(int index)
 
     if (!pass)
     {
-        printf("num fin=%d\n", num_finished);
+        printf("[ ");
+        for (size_t i = 0; i < N; i++)
+        {
+            printf("%d ", last_burst_index[i]);
+        }
+        printf("]\n");
+        
+        // printf("num fin=%d\n", num_finished);
 
         if (algorithm_type == ALGO_VRUNTIME)
         {
@@ -83,7 +106,7 @@ void print_queue(int index)
             printf("\n");
         }
 
-        printf("[selected index %d]\n", index);
+        printf("Queue: [consume %d]: ", index);
 
         if (root_node == NULL)
         {
@@ -135,7 +158,7 @@ int select_burst_by_algorithm()
         queue_node* current_node = root_node;
         int current_index = 0;
         int shortest_index = 0;
-        unsigned int shortest_time = -1;
+        int shortest_time = MAX_NUMBER;
 
         while (current_node != NULL)
         {
@@ -163,7 +186,7 @@ int select_burst_by_algorithm()
         queue_node* current_node = root_node;
         int current_index = 0;
         int priori_index = 0;
-        unsigned int priori_min = -1;
+        int priori_min = MAX_NUMBER;
 
         while (current_node != NULL)
         {
@@ -192,7 +215,7 @@ int select_burst_by_algorithm()
 
         queue_node* current_node = root_node;
         int current_index = 0;
-        unsigned int smallest_vruntime = -1;
+        int smallest_vruntime = MAX_NUMBER;
         int smallest_vruntime_index = 0;
 
         while (current_node != NULL)
@@ -253,6 +276,7 @@ void custom_sleep(int sleep_ms)
 
 int insert(burst_struct* burst)
 {
+    // Insert at the begining
     if (root_node == NULL)
     {
         root_node = (queue_node*) malloc(sizeof(queue_node));
@@ -261,14 +285,11 @@ int insert(burst_struct* burst)
     } 
     else 
     {
-        queue_node* current = root_node;
-
-        while (current->next != NULL)
-            current = current->next;
+        queue_node* old_root_node = root_node;
         
-        current->next = (queue_node*) malloc(sizeof(queue_node));
-        current->next->burst = *burst;
-        current->next->next = NULL;
+        root_node = (queue_node*) malloc(sizeof(queue_node));
+        root_node->burst = *burst;
+        root_node->next = old_root_node;
     }
 
     rq_size += 1;
@@ -326,6 +347,7 @@ int consume(burst_struct* burst, int index) // This consume method is non blocki
 void* worker_thread(void* args)
 {
     int thread_index = *((int*) args);
+    int current_executed_burst = 0;
 
     if (generate_randomly == 0) // Read from file
     {
@@ -368,8 +390,51 @@ void* worker_thread(void* args)
             insert(&burst);
             pthread_mutex_unlock(&rq_mutex);
 
-            custom_sleep(burst.length_ms);
-            custom_sleep(burst.inter_arrival_time);
+            // Get before time
+            long before_time = get_time_ms();
+            long after_time;
+
+            do 
+            {
+                pthread_mutex_lock(&exec_mutex);
+
+                // Calculate the after time
+                after_time = get_time_ms();
+
+                // Check if the burst is increased
+                if (burst.thread_index == thread_index && burst.burst_index == burst_index && current_executed_burst == num_burst_executed - 1)
+                {
+                    // If last burst index is increased we know thread is slept enough
+                    // First update the current executed burst
+                    current_executed_burst += 1;
+
+                    // Then increment the consumed burst count to notify the server
+                    num_threads_consumed_exec += 1;
+                    
+                    long wait_time_ms = after_time - before_time;
+
+                    
+                    // If thread has waited more than it should
+                    if (wait_time_ms > burst.inter_arrival_time + burst.length_ms)
+                    {
+                        // register the wait time here!
+                        wait_times[thread_index - 1] += 1;
+                    }
+                    else 
+                    {
+                        long thread_sleep_time_until_new_burst = burst.inter_arrival_time - burst.inter_arrival_time;
+                        custom_sleep(thread_sleep_time_until_new_burst);
+                    }
+
+                    // Unlock the threads then exit
+                    pthread_mutex_unlock(&exec_mutex);
+
+                    break;
+                }
+                
+                pthread_mutex_unlock(&exec_mutex);
+                custom_sleep(1);
+            } while (1);    
 
             burst_index++;
         }
@@ -392,8 +457,52 @@ void* worker_thread(void* args)
             insert(&burst);
             pthread_mutex_unlock(&rq_mutex);
 
-            custom_sleep(burst.length_ms);
-            custom_sleep(burst.inter_arrival_time);
+            // Get before time
+            long before_time = get_time_ms();
+            long after_time;
+
+            do 
+            {
+                pthread_mutex_lock(&exec_mutex);
+
+                // Calculate the after time
+                after_time = get_time_ms();
+
+                // Check if the burst is increased
+                if (burst.thread_index == thread_index && burst.burst_index == burst_index && current_executed_burst == num_burst_executed - 1)
+                {
+                    // If last burst index is increased we know thread is slept enough
+                    // First update the current executed burst
+                    current_executed_burst += 1;
+
+                    // Then increment the consumed burst count to notify the server
+                    num_threads_consumed_exec += 1;
+                    
+                    long wait_time_ms = after_time - before_time;
+
+                    
+                    // If thread has waited more than it should
+                    if (wait_time_ms > burst.inter_arrival_time + burst.length_ms)
+                    {
+                        // register the wait time here!
+                        // printf("Wait time = %ld\n", wait_time_ms);
+                        wait_times[thread_index - 1] += 1;
+                    }
+                    else 
+                    {
+                        long thread_sleep_time_until_new_burst = burst.inter_arrival_time - burst.inter_arrival_time;
+                        custom_sleep(thread_sleep_time_until_new_burst);
+                    }
+
+                    // Unlock the threads then exit
+                    pthread_mutex_unlock(&exec_mutex);
+
+                    break;
+                }
+                
+                pthread_mutex_unlock(&exec_mutex);
+                custom_sleep(1);
+            } while (1);            
         }
     }
 
@@ -444,13 +553,9 @@ void* server_thread(void* args)
             pthread_mutex_unlock(&active_mutex);
 
         } while (success == 0 && !schutdown_scheduler);
-
-        // Do not print in case of shutdown
-        if (schutdown_scheduler)
-            break;
         
         // Print the consumed burst
-        printf("Consumed: "); print_burst(&burst); printf("\n\n");
+        printf("Consumed: "); print_burst(&burst); printf("\n\n");        
 
         // Increment the vruntime while consuming the burst
         if (algorithm_type == ALGO_VRUNTIME)
@@ -460,9 +565,47 @@ void* server_thread(void* args)
             vruntime[real_thread_index] += (int) ((double) burst.length_ms) * (0.7 + 0.3 * burst.thread_index);
         }
 
-        // Simulate execution by sleeping
+        pthread_mutex_lock(&exec_mutex);
+        pthread_mutex_lock(&active_mutex);
+
+        num_burst_executed += 1;
+        selected_burst = burst;
+
+        // Simulate execution by sleeping, this also halts other threads
         custom_sleep(burst.length_ms);
 
+        // Wait for other threads to consume new information
+        do 
+        {
+            // printf("num_threads_consumed=%d N=%d num_finished=%d\n", num_threads_consumed_exec, N, num_finished);
+
+            if (num_threads_consumed_exec == N - num_finished || N == num_finished)
+            {
+                pthread_mutex_unlock(&exec_mutex);
+                pthread_mutex_unlock(&active_mutex);
+                break;
+            }
+
+            pthread_mutex_unlock(&exec_mutex);
+            pthread_mutex_unlock(&active_mutex);
+            custom_sleep(1);
+            pthread_mutex_lock(&exec_mutex);
+            pthread_mutex_lock(&active_mutex);
+        } while (1);
+
+        
+        
+
+        // After this point we are certain all threads are notified about the latest
+        pthread_mutex_lock(&exec_mutex);
+        pthread_mutex_lock(&active_mutex);
+        num_threads_consumed_exec = 0;
+        pthread_mutex_unlock(&exec_mutex);
+        pthread_mutex_unlock(&active_mutex);
+
+        // Do not print in case of shutdown
+        if (schutdown_scheduler)
+            break;
         i++;
     }
 
@@ -564,6 +707,7 @@ void parse_parameters(int argc, char const *argv[])
     {
         last_burst_index[i] = 0;
         vruntime[i] = 0;
+        wait_times[i] = 0;
     }
     root_node = NULL;
     num_finished = 0;
@@ -581,10 +725,14 @@ int main(int argc, char const *argv[])
 {
     // Parse the parameters and write them to global space
     parse_parameters(argc, argv);
+    
+    // Get Before time
+    long before_time = get_time_ms();
 
     // Init mutex and queue
     pthread_mutex_init(&rq_mutex, NULL);
     pthread_mutex_init(&active_mutex, NULL);
+    pthread_mutex_init(&exec_mutex, NULL);
 
     // Server thread (scheduler thread)
     pthread_t server_tid;
@@ -606,7 +754,8 @@ int main(int argc, char const *argv[])
     // Destroy ready queue
     pthread_mutex_destroy(&rq_mutex);
     pthread_mutex_destroy(&active_mutex);
+    pthread_mutex_destroy(&exec_mutex);
 
-    printf("Simulation finished.\n");
+    printf("\nSimulation finished in %ld ms.\n", get_time_ms() - before_time);
     return 0;
 }
