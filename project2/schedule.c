@@ -17,6 +17,9 @@
 
 #define MAX_NUMBER 294967294
 
+#define DEBUG 0
+#define PRINT_QUEUE 1
+
 #define N_MAX 10
 
 // structs and typedefs
@@ -68,6 +71,9 @@ int num_finished;
 queue_node* root_node;
 size_t rq_size = 0;
 
+int* burst_length_statistics;
+int burst_length_statistics_last_index;
+
 long get_time_ms()
 {
     struct timeval current_timeval;
@@ -85,9 +91,7 @@ void print_burst(burst_struct* burst)
 
 void print_queue(int index)
 {
-    int pass = 0;
-
-    if (!pass)
+    if (PRINT_QUEUE)
     {
         printf("[ ");
         for (size_t i = 0; i < N; i++)
@@ -106,6 +110,7 @@ void print_queue(int index)
             printf("\n");
         }
 
+        
         printf("Queue: [consume %d]: ", index);
 
         if (root_node == NULL)
@@ -123,9 +128,11 @@ void print_queue(int index)
                 current_node = current_node->next;
             }
         }
+
+        printf("\n");
     }
 
-    printf("\n");
+    
 }
 
 int select_burst_by_algorithm()
@@ -265,6 +272,8 @@ int random_exp_dist(int minimum, int mean)
         result = (int) (-log(1 - temp) * mean);
 
     } while (result < minimum);
+
+    burst_length_statistics[burst_length_statistics_last_index++] = result;
     
     return result;
 }
@@ -554,8 +563,14 @@ void* server_thread(void* args)
 
         } while (success == 0 && !schutdown_scheduler);
         
-        // Print the consumed burst
-        printf("Consumed: "); print_burst(&burst); printf("\n\n");        
+        
+        if (PRINT_QUEUE)
+        {
+            // Print the consumed burst
+            printf("Consumed: "); 
+            print_burst(&burst); 
+            printf("\n\n");
+        }
 
         // Increment the vruntime while consuming the burst
         if (algorithm_type == ALGO_VRUNTIME)
@@ -725,6 +740,11 @@ int main(int argc, char const *argv[])
 {
     // Parse the parameters and write them to global space
     parse_parameters(argc, argv);
+
+    int burst_lengths[N * 1024];
+
+    burst_length_statistics = burst_lengths;
+    burst_length_statistics_last_index = 0;
     
     // Get Before time
     long before_time = get_time_ms();
@@ -757,5 +777,23 @@ int main(int argc, char const *argv[])
     pthread_mutex_destroy(&exec_mutex);
 
     printf("\nSimulation finished in %ld ms.\n", get_time_ms() - before_time);
+
+    printf("Waiting times of threads:\n");
+    
+    for (int i = 0; i < N; i++)
+    {
+        printf("Thread %d waited %d ms\n", i + 1, wait_times[i]);
+    }
+
+    if (DEBUG == 1)
+    {
+        printf("Burst times (ms):\n");
+
+        for (int i = 0; i < burst_length_statistics_last_index; i++)
+        {
+            printf("%d\n", burst_lengths[i]);
+        }
+    }
+    
     return 0;
 }
