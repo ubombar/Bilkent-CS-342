@@ -14,215 +14,97 @@
 
 #define DEBUG
 
-struct sbmem_node
-{
-    int size;
-    unsigned char allocated;
-    struct sbmem_node *next;
-};
+#define MIN_MEMORY_POW 7 // 2^7=128
 
 sem_t mutex;
 
+// Memory and freelist
 void *segment;
+int segment_size;
+
+char* freelist;
+int freelist_size;
 
 unsigned int num_processes = 0;
 
-struct sbmem_node head;
-
-int len() {
-    struct sbmem_node *tmp = &head;
-    int l = 0;
-    while (tmp != NULL)
-    {
-        l++;
-        tmp = tmp->next;
+int to_multiple_of_two(int n) {
+    if (n <= 0) {
+        return n;
     }
 
-    return l;
+    int mul = 1;
+
+    while (mul < n) {
+        mul = mul << 1;
+    }
+
+    return mul;
 }
 
-void __reverse_patch_little_buddy(struct sbmem_node *n)
-{
-    if (n == NULL)
-    {
-        return;
-    }
-
-    __reverse_patch_little_buddy(n->next);
-
-    if (n->next == NULL)
-    {
-        return;
-    }
-
-    struct sbmem_node *nn = n->next;
-
-    if (n->size == nn->size && n->allocated == nn->allocated && n->allocated == 0)
-    {
-        struct sbmem_node *temp = nn->next;
-
-        free(nn);
-
-        n->size *= 2;
-        n->next = temp;
-
-        __reverse_patch_little_buddy(n);
-        return;
-    }
-    return;
+int heap_left(int c) {
+    return 2 * c + 1;
 }
 
-int __hello_little_buddy(struct sbmem_node *n, int s, int offset)
-{
-    if (n == NULL)
-    {
-        return -1;
-    }
-
-    if (n->allocated == 1)
-    {
-        return __hello_little_buddy(n->next, s, offset + n->size);
-    }
-
-    if (n->size == s)
-    {
-        n->allocated = 1;
-        return offset;
-    }
-    else if (n->size > s)
-    {
-        int csize = n->size;
-        struct sbmem_node *tmp = n->next;
-
-        n->next = malloc(sizeof(struct sbmem_node));
-        n->allocated = 0;
-        n->size = csize >> 1;
-
-        n->next->next = tmp;
-        n->next->allocated = 0;
-        n->next->size = csize >> 1;
-
-        return __hello_little_buddy(n, s, offset);
-    }
-    else
-    {
-        return __hello_little_buddy(n->next, s, offset + n->size);
-    }
-}
-
-void __print_little_buddy(int offset, int reqsize)
-{
-    // printf("Trying to allocate %d bytes. ", reqsize);
-
-    // if (offset == -1)
-    // {
-    //     printf("Failed to allocate %d bytes!\n", reqsize);
-    // }
-    // else
-    // {
-    //     printf("Allocated %d bytes with offset %d\n", reqsize, offset);
-    // }
-
-    struct sbmem_node *tmp = &head;
-    while (tmp != NULL)
-    {
-        printf("(%d, %d)->", tmp->size, tmp->allocated);
-        tmp = tmp->next;
-    }
-    printf("\n");
-}
-
-int __bye_little_buddy(struct sbmem_node *n, int offset)
-{
-    if (n == NULL)
-    {
-        return -1;
-    }
-
-    if (offset == 0)
-    {
-        if (n->allocated != 1)
-        {
-            return -1;
-        }
-        n->allocated = 0;
-
-        // if (n->next != NULL) {
-        //     struct sbmem_node* nn = n->next;
-
-        //     if (n->size == nn->size && (n->allocated == nn->allocated) == 0) {
-        //         struct sbmem_node* temp = nn->next;
-
-        //         n->size *= 2;
-        //         n->next = temp;
-
-        //         free(nn);
-        //     }
-        // }
-        return 1;
-    }
-    else
-    {
-        return __bye_little_buddy(n->next, offset - n->size);
-    }
+int heap_right(int c) {
+    return 2 * c + 2;
 }
 
 // This will be initialized by one process thus no need for semaphores.
 int sbmem_init(int segsize)
 {
-    if (segsize <= 0)
-    {
+    // Cannot be negative
+    if (segsize <= 0) {
         return -1;
     }
 
-    sem_init(&mutex, 1, 1);
+    int segsize_c = to_multiple_of_two(segsize);
+    const int min_memory_size = (0x01 << MIN_MEMORY_POW);
 
-    int tmp = segsize;
-    int num_bits = 0;
-
-    for (int i = 0; i < sizeof(int) * 8; i++)
-    {
-        num_bits = num_bits + (tmp % 2);
-        tmp = tmp >> 1;
+    // Not Multiple of two
+    if (segsize != segsize_c) {
+        return -1;
     }
 
-    // segsize is not a multiple of 2
-    if (num_bits != 1)
-    {
+    // Cannot be smaller than minimum memory
+    if (segsize_c < min_memory_size) {
         return -1;
     }
 
     int fd = shm_open("shared_m", O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
 
-    if (fd == -1)
-    {
+    if (fd == -1) {
         shm_unlink("shared_m");
         fd = shm_open("shared_m", O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
     }
 
-    if (fd == -1)
+    // Cannot open memory
+    if (fd == -1) {
+        return -1;
+    }
+
+    // allocate the free list heap inside the memory segment
+    int free_list_size = sizeof(char) * (2 * (segsize_c / min_memory_size) - 1);
+
+    int r = ftruncate(fd, free_list_size + segsize_c);
+    
+    // If cannot truncate
+    if (r == -1) {
+        return -1;
+    }
+
+    void* mmap_segmnet = mmap(NULL, segsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+    // If cannot create segmnet
+    if (mmap_segmnet == NULL)
     {
         return -1;
     }
 
-    int r = ftruncate(fd, segsize);
+    freelist_size = free_list_size;
+    freelist = mmap_segmnet;
 
-    if (r == -1)
-    {
-        return -1;
-    }
-
-    segment = mmap(NULL, segsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-
-    if (segment == NULL)
-    {
-        return -1;
-    }
-
-    head.allocated = 0;
-    head.next = NULL;
-    head.size = segsize;
-
+    segment_size = segsize_c;
+    segment = ((char*) mmap_segmnet) + freelist_size;
     return 0;
 }
 
@@ -262,65 +144,18 @@ int sbmem_close()
 
 void *sbmem_alloc(int reqsize)
 {
-    if (reqsize <= 0)
-    {
-        return NULL;
-    }
-    {
-        // Normalize the reqsize to power of two
-        int tmp = reqsize;
-        int msb = 0;
-        int cbit = 0;
-        for (size_t i = 0; i < sizeof(reqsize) * 8; i++)
-        {
-            if (tmp % 2 == 1)
-            {
-                msb = i;
-                cbit++;
-            }
-            tmp = tmp >> 1;
-        }
-
-        if (cbit != 1)
-        {
-            msb++;
-        }
-
-        // Set reqsize to power of two
-        reqsize = 1 << msb;
-    }
-
-    // Buddy allocation algorithm
     sem_wait(&mutex);
-
-    int offset = __hello_little_buddy(&head, reqsize, 0);
-
-#ifdef DEBUG
-    __print_little_buddy(offset, reqsize);
-#endif
 
     sem_post(&mutex);
 
-    if (offset == -1)
-    {
-        return NULL;
-    }
-
-    return segment + offset;
+    return 0;
 }
 
 void sbmem_free(void *ptr)
 {
     sem_wait(&mutex);
-    int offset = ptr - segment;
 
-    int r = __bye_little_buddy(&head, offset);
 
-    __reverse_patch_little_buddy(&head);
-
-#ifdef DEBUG
-    __print_little_buddy(0, 0);
-#endif
 
     sem_post(&mutex);
 }
