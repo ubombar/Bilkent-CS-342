@@ -1,57 +1,120 @@
-
 #include <unistd.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
+#include <sys/wait.h>
 
 #include "sbmem.h"
 
 
-#define SEGSIZE 1024
-
 int main()
 {
-    srand(time(NULL));
 
-    int r = sbmem_init(SEGSIZE);
-    printf("sbmem_init() => %d\n", r);
+    int i, j, k, ret; 
 
-    r = sbmem_open();
-    printf("sbmem_open() => %d\n", r);
+    printf("------------------- SIMPLE TEST STARTED -------------------\n");
+    char *p1, *p2;  
+
+    ret = sbmem_open(); 
+    if (ret == -1)
+        exit (1); 
+    printf("Simple test: sbmem_open() done\n");
+
+    p1 = sbmem_alloc (256);
+    printf("Simple test: sbmem_alloc(256) done\n");
+
+    p2 = sbmem_alloc (128);
+    printf("Simple test: sbmem_alloc(128) done\n");
+
+    
+    for (i = 0; i < 256; ++i)
+        p1[i] = 'A';
+
+    for (i = 0; i < 128; ++i)
+        p2[i] = 'B';
+    
+    for (i = 0; i < 256; ++i)
+        if (p1[i] != 'A')
+        {
+            printf("Simple test failed: case A\n");
+            exit(1);
+        }
+            
+    for (i = 0; i < 128; ++i)
+        if (p2[i] != 'B')
+        {
+            printf("Simple test failed: case B\n");
+            exit(1);
+        }
+
+    sbmem_free(p1);
+    printf("Simple test: sbmem_free(p1) done\n");
+    
+    sbmem_free(p2);
+    printf("Simple test: sbmem_free(p2) done\n");
+
+    sbmem_close(); 
+    printf("Simple test: sbmem_close() done\n");
+    printf("------------------- SIMPLE TEST FINISHED -------------------\n\n");
+
+    
+    printf("------------------- COMPLEX TEST STARTED -------------------\n");
+    char *p[10];
+    int sizes[10];
+    int size;
+    for(i=0; i < 5; i++) 
+    {
+        if(fork() == 0)
+        {   
+            srand(time(NULL));
+
+            ret = sbmem_open();
+            if (ret == -1)
+                exit (1); 
+            printf("Process %d: sbmem_open() done\n", i);
 
 
+            for(j = 0; j < 10; j++)
+            {
+                while((size = rand() % 4097) < 128);
+                sizes[j] = size;
+                p[j] = sbmem_alloc(size);
 
-    r = sbmem_close();
-    printf("sbmem_close() => %d\n", r);
+                for (k = 0; k < size; k++)
+                    p[j][k] = i + '0';
 
-    void* mem1 = sbmem_alloc(512);
-    void* mem2 = sbmem_alloc(128);
-    void* mem3 = sbmem_alloc(128);
-    void* mem4 = sbmem_alloc(128);
-    void* mem5 = sbmem_alloc(128);
+                usleep(100);
+            }
+            printf("Process %d: sbmem_alloc() done\n", i);
 
-    // printf("mem1=%p, mem2=%p, mem3=%p, mem4=%p, mem5=%p\n", mem1, mem2, mem3, mem4, mem5);
-    // printf("The difference between them should be 512, mem2 - mem1 = %d\n", mem2 - mem1);
 
-    sbmem_free(mem1);
-    sbmem_free(mem2);
+            for(j = 0; j < 10; j++)
+            {
+                for (k = 0; k < sizes[j]; k++)
+                    if ( p[j][k] != i + '0')
+                    {
+                        printf("Complex test failed\n");
+                        exit(1);    
+                    }
+            }
 
-    sbmem_free(mem3);
-    sbmem_free(mem4);
-    sbmem_free(mem5);
+            for(j = 0; j < 10; j++)
+            {
+                sbmem_free(p[j]);
+                usleep(100);
+            }
+            printf("Process %d: sbmem_free() done\n", i);
 
-    // pid_t pid = fork();
+            sbmem_close();
+            printf("Process %d: sbmem_close() done\n", i);
+            exit(0);
+        }
+    }
 
-    // if (pid != 0) {
-    //     void* p = sbmem_alloc(128);
-    //     printf("p1: sbmem_alloc(128) => %p\n", p);
-    //     sbmem_free(p);
+    for(int i=0;i<5;i++)
+        wait(NULL);
 
-    // } else {
-    //     void* p = sbmem_alloc(512);
-    //     printf("p2: sbmem_alloc(512) => %p\n", p);
-    //     sbmem_free(p);
-    // }
+    printf("------------------- COMPLEX TEST FINISHED -------------------\n\n");
 
-    return 0;
+    return (0); 
 }

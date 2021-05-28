@@ -27,6 +27,23 @@ int freelist_size;
 
 unsigned int num_processes = 0;
 
+int __log2(int x) {
+    if (x <= 0) {
+        return -1;
+    }
+
+    int l = 0;
+    int n = 1;
+
+    while (n < x) {
+        l += 1;
+        n *= 2;
+    }
+
+    return l;
+    
+}
+
 int to_multiple_of_two(int n) {
     if (n <= 0) {
         return n;
@@ -104,8 +121,8 @@ int __deallocate_on_bitmap(int heap_index) {
         heap_req = heap_left(heap_req);
     }
 
-    printf("heap_index=%d\n", heap_index);
-    printf("heap_req=%d\n", heap_req);
+    // printf("heap_index=%d\n", heap_index);
+    // printf("heap_req=%d\n", heap_req);
 
     // set the current node to available
     int h_left = heap_left(heap_req);
@@ -186,7 +203,7 @@ int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
             return -1;
         }
 
-        printf("h_left=%d, h_right=%d\n", h_left, h_right);
+        // printf("h_left=%d, h_right=%d\n", h_left, h_right);
 
         // current chunk is allocated
         if (freelist[heap_index] == 1 && freelist[h_left] == 0 && freelist[h_right] == 0) {
@@ -254,23 +271,6 @@ void* __heap_index_to_ptr(int heap_index) {
     return NULL;    
 }
 
-int __log2(int x) {
-    if (x <= 0) {
-        return -1;
-    }
-
-    int l = 0;
-    int n = 1;
-
-    while (n < x) {
-        l += 1;
-        n *= 2;
-    }
-
-    return l;
-    
-}
-
 int __ptr_to_heap_index(void* ptr) {
     int offset = ptr - segment;
     const int max_depth = 1 + __log2(segment_size / (0x01 << MIN_MEMORY_POW));
@@ -280,7 +280,7 @@ int __ptr_to_heap_index(void* ptr) {
         int rdepth = max_depth - depth - 1;
         int chunk_size = (0x01 << (MIN_MEMORY_POW + rdepth)); //  for depth this is segmnet size
 
-        printf("index_offset=%d, offset / chunk_size=%d, offset mode chunk_size = %d\n", index_offset, offset / chunk_size, offset % chunk_size );
+        // printf("index_offset=%d, offset / chunk_size=%d, offset mode chunk_size = %d\n", index_offset, offset / chunk_size, offset % chunk_size );
         if (offset % chunk_size == 0) {
             return index_offset + offset / chunk_size;
         }
@@ -326,14 +326,16 @@ int sbmem_init(int segsize)
     // allocate the free list heap inside the memory segment
     int free_list_size = (2 * (segsize_c / min_memory_size) - 1);
 
-    int r = ftruncate(fd, sizeof(char) * free_list_size + segsize_c);
+    int total_size = sizeof(int) + sizeof(char) * free_list_size + segsize_c;
+
+    int r = ftruncate(fd, total_size);
     
     // If cannot truncate
     if (r == -1) {
         return -1;
     }
 
-    void* mmap_segmnet = mmap(NULL, segsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void* mmap_segmnet = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
     // If cannot create segmnet
     if (mmap_segmnet == NULL)
@@ -341,11 +343,13 @@ int sbmem_init(int segsize)
         return -1;
     }
 
+    *((int*) mmap_segmnet) = total_size;
+
     freelist_size = free_list_size;
-    freelist = mmap_segmnet;
+    freelist = mmap_segmnet + sizeof(int);
 
     segment_size = segsize_c;
-    segment = ((char*) mmap_segmnet) + freelist_size;
+    segment = mmap_segmnet + freelist_size + sizeof(int);
 
     sem_init(&mutex, 10, 1);
 
@@ -362,6 +366,8 @@ int sbmem_remove()
 
 int sbmem_open()
 {
+    sem_init(&mutex, 10, 1);
+
     sem_wait(&mutex);
     if (num_processes >= 10)
     {
@@ -370,6 +376,10 @@ int sbmem_open()
     }
     num_processes += 1;
     sem_post(&mutex);
+
+    
+
+    
     return 0;
 }
 
@@ -390,7 +400,7 @@ void *sbmem_alloc(int reqsize)
 {
     sem_wait(&mutex);
 
-    __print_heap();
+    // __print_heap();
 
     reqsize = __max(to_multiple_of_two(reqsize), (0x01 << MIN_MEMORY_POW)); // cannot allocate less than 128 bytes!
 
@@ -400,7 +410,7 @@ void *sbmem_alloc(int reqsize)
 
     // printf("> allocation result = %d\n", heap_index);
 
-    __print_heap();
+    // __print_heap();
 
     sem_post(&mutex);
 
@@ -411,14 +421,14 @@ void sbmem_free(void *ptr)
 {
     sem_wait(&mutex);
 
-    __print_heap();
+    // __print_heap();
 
     int heap_index_to_delete = __ptr_to_heap_index(ptr);
 
-    printf("heap_index_to_delete=%d\n", heap_index_to_delete);
+    // printf("heap_index_to_delete=%d\n", heap_index_to_delete);
 
     if (heap_index_to_delete == -1) {
-        return -1;
+        return;
     }
 
     int r = __deallocate_on_bitmap(heap_index_to_delete);
@@ -427,9 +437,9 @@ void sbmem_free(void *ptr)
         freelist[0] = 0;
     }
 
-    printf("> free result = %d\n", r);
+    // printf("> free result = %d\n", r);
 
-    __print_heap();
+    // __print_heap();
 
 
     sem_post(&mutex);
