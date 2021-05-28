@@ -14,10 +14,15 @@ int main()
     srand(time(NULL));
 
     int r = sbmem_init(SEGSIZE);
+    printf("sbmem_init() => %d\n", r);
 
-    printf("%d\n", r);
+    r = sbmem_open();
+    printf("sbmem_open() => %d\n", r);
 
-    // int ret = sbmem_open();
+    
+
+    r = sbmem_close();
+    printf("sbmem_close() => %d\n", r);
 
 
     // if (ret == -1)

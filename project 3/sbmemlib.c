@@ -105,6 +105,9 @@ int sbmem_init(int segsize)
 
     segment_size = segsize_c;
     segment = ((char*) mmap_segmnet) + freelist_size;
+
+    sem_init(&mutex, 10, 1);
+
     return 0;
 }
 
