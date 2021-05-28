@@ -280,13 +280,12 @@ int __ptr_to_heap_index(void* ptr) {
         int rdepth = max_depth - depth - 1;
         int chunk_size = (0x01 << (MIN_MEMORY_POW + rdepth)); //  for depth this is segmnet size
 
-        // printf("max_depth=%d, pow=%d\n", max_depth, 0x01 << depth);
+        printf("index_offset=%d, offset / chunk_size=%d, offset mode chunk_size = %d\n", index_offset, offset / chunk_size, offset % chunk_size );
         if (offset % chunk_size == 0) {
-
             return index_offset + offset / chunk_size;
         }
 
-        index_offset = index_offset + 0x01 << depth;
+        index_offset = index_offset + (0x01 << depth);
     }
     return -1;
 }
@@ -416,11 +415,17 @@ void sbmem_free(void *ptr)
 
     int heap_index_to_delete = __ptr_to_heap_index(ptr);
 
+    printf("heap_index_to_delete=%d\n", heap_index_to_delete);
+
     if (heap_index_to_delete == -1) {
         return -1;
     }
 
     int r = __deallocate_on_bitmap(heap_index_to_delete);
+
+    if (freelist[1] == 0 && freelist[2] == 0) {
+        freelist[0] = 0;
+    }
 
     printf("> free result = %d\n", r);
 

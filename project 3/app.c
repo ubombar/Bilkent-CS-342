@@ -30,11 +30,15 @@ int main()
     void* mem4 = sbmem_alloc(128);
     void* mem5 = sbmem_alloc(128);
 
-    printf("mem1=%p, mem2=%p, mem3=%p, mem4=%p, mem5=%p\n", mem1, mem2, mem3, mem4, mem5);
+    // printf("mem1=%p, mem2=%p, mem3=%p, mem4=%p, mem5=%p\n", mem1, mem2, mem3, mem4, mem5);
     // printf("The difference between them should be 512, mem2 - mem1 = %d\n", mem2 - mem1);
 
+    sbmem_free(mem1);
     sbmem_free(mem2);
-    sbmem_free(mem2);
+
+    sbmem_free(mem3);
+    sbmem_free(mem4);
+    sbmem_free(mem5);
 
     // pid_t pid = fork();
 
