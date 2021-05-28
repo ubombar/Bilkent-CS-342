@@ -133,11 +133,12 @@ void* __heap_index_to_ptr(int heap_index) {
     int rightmost = 0;
 
     for (size_t depth = 0; depth < max_depth; depth++) {
-        if (leftmost >= heap_index && rightmost <= heap_index) {
+        if (leftmost <= heap_index && rightmost >= heap_index) {
             // offset = CHUNK SIZE IN CURRENT DEPTH * INDEX OFFSET
             int offset = (segment_size >> depth) * (heap_index - leftmost);
-            return ((char*) segment)[offset];
+            return segment + offset;
         }
+        // printf("leftmost=%d, rightmost=%d, heap_index=%d\n", leftmost, rightmost, heap_index);
         leftmost = heap_left(leftmost);
         rightmost = heap_right(rightmost);
     }
@@ -157,7 +158,7 @@ int __ptr_to_heap_index(void* ptr) {
         if (offset % chunk_size == 0) {
             return index_offset + offset / chunk_size;
         }
-        
+
         index_offset = index_offset + 0x01 << depth;
     }
     return -1;
@@ -275,7 +276,6 @@ void *sbmem_alloc(int reqsize)
     int heap_index = __allocate_on_bitmap(reqsize, 0, 0);
 
     printf("> allocation result = %d\n", heap_index);
-    
 
     __print_heap();
 
@@ -283,7 +283,7 @@ void *sbmem_alloc(int reqsize)
 
     sem_post(&mutex);
 
-    return 0;
+    return __heap_index_to_ptr(heap_index);
 }
 
 void sbmem_free(void *ptr)

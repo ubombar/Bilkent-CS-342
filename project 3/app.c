@@ -24,9 +24,11 @@ int main()
     r = sbmem_close();
     printf("sbmem_close() => %d\n", r);
 
-    sbmem_alloc(256);
-    sbmem_alloc(512);
-    sbmem_alloc(512);
+    void* mem1 = sbmem_alloc(512);
+    void* mem2 = sbmem_alloc(512);
+
+    printf("mem1 = %p, mem2 = %p\n", mem1, mem2);
+    printf("The difference between them should be 512, mem2 - mem1 = %d\n", mem2 - mem1);
 
     // pid_t pid = fork();
 
