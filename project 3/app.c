@@ -34,6 +34,7 @@ int main()
     // printf("The difference between them should be 512, mem2 - mem1 = %d\n", mem2 - mem1);
 
     sbmem_free(mem2);
+    sbmem_free(mem2);
 
     // pid_t pid = fork();
 

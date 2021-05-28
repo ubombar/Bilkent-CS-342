@@ -108,6 +108,21 @@ int __deallocate_on_bitmap(int heap_index) {
     printf("heap_req=%d\n", heap_req);
 
     // set the current node to available
+    int h_left = heap_left(heap_req);
+    int h_right = heap_right(heap_req);
+
+    // not enough memory!
+    // printf("freelist_size=%d\n", freelist_size);
+    if (h_left < freelist_size && h_right < freelist_size) {
+        if (freelist[h_left] != 0 || freelist[h_right] != 0) {
+            // printf("> wow\n");
+            return -1; // already allocated!
+        }
+    }
+
+    // printf("h_left=%d, h_right=%d\n", h_left, h_right);
+
+    // current chunk is allocated
     freelist[heap_req] = 0;
     heap_req = heap_parent(heap_req);
 
@@ -116,7 +131,15 @@ int __deallocate_on_bitmap(int heap_index) {
         if (heap_req == 0) {
             return 0;
         }
+        
+        int h_left = heap_left(heap_req);
+        int h_right = heap_right(heap_req);
 
+        // not enough memory!
+        // printf("freelist_size=%d\n", freelist_size);
+        if (freelist[h_left] != 0 || freelist[h_right] != 0) {
+            break;
+        }
         freelist[heap_req] = 0;
 
         int heap_req_buddy = heap_buddy(heap_req);
@@ -160,7 +183,6 @@ int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
 
         // not enough memory!
         if (h_left > freelist_size || h_right > freelist_size) {
-            
             return -1;
         }
 
@@ -168,7 +190,7 @@ int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
 
         // current chunk is allocated
         if (freelist[heap_index] == 1 && freelist[h_left] == 0 && freelist[h_right] == 0) {
-            printf("ff\n");
+            // printf("ff\n");
             return -1; // already allocated!
         }
 
