@@ -63,31 +63,74 @@ int heap_buddy(int c) {
     }
 }
 
-int _deallocate_on_bitmap(int heap_index, int depth){
-    int current_size = segment_size >> depth;
-
-
-    if(freeList[heap_index] == 0) // already free
+int heap_parent(int c) {
+    if (c == 0) {
         return -1;
-    else{
-        if(heap_index % 2 == 0){ // if even
-            if(freeList[heap_index - 1] == 0){ // if sibling is also 0
-                // make parent zero
-                freeList[(heap_index - 1) / 2] = 0;
-            }
+    }
+
+    return (c - 1) / 2;
+}
+
+int __deallocate_on_bitmap(int heap_index) {
+    const int max_depth = 1 + __log2(segment_size / (0x01 << MIN_MEMORY_POW));
+    int index_depth = 0;
+    int leftmost = 0;
+    int rightmost = 0;
+
+    // find the depth of the index
+    for (size_t depth = 0; depth < max_depth; depth++) {
+        if (leftmost <= heap_index && rightmost >= heap_index) {
+            index_depth = depth;
+            break;
         }
-        else{
-            if(freeList[heap_index + 1] == 0){ // if sibling is also 0
-                // make parent zero
-                freeList[(heap_index - 1) / 2] = 0;
-            }
+        // printf("leftmost=%d, rightmost=%d, heap_index=%d\n", leftmost, rightmost, heap_index);
+        leftmost = heap_left(leftmost);
+        rightmost = heap_right(rightmost);
+    }
+
+    int heap_req = heap_index;
+
+    while (1) {
+        if (heap_req > freelist_size) {
+            heap_req = heap_parent(heap_req);
+            break;
         }
-        freeList[heap_index] = 0; // free biggest
-        // recursive olmalı
-        return heap_index;
-    }    
+
+        if (freelist[heap_req] == 0) {
+            heap_req = heap_parent(heap_req);
+            break;
+        }
+
+        heap_req = heap_left(heap_req);
+    }
+
+    printf("heap_index=%d\n", heap_index);
+    printf("heap_req=%d\n", heap_req);
+
+    // set the current node to available
+    freelist[heap_req] = 0;
+    heap_req = heap_parent(heap_req);
+
+    while (1) {
+        // successfull exit
+        if (heap_req == 0) {
+            return 0;
+        }
+
+        freelist[heap_req] = 0;
+
+        int heap_req_buddy = heap_buddy(heap_req);
+
+        // If buddy is also available, merge and proceed to up
+        if (freelist[heap_req_buddy] == 0) {
+            heap_req = heap_parent(heap_req);
+        } else {
+            return 0;
+        }
+    }
     
-    
+
+    return 0;
 }
 
 // allocate memory on bitmap, size_pow2 is power of two!
@@ -110,8 +153,24 @@ int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
         freelist[heap_index] = 1;
         return heap_index;
     } else if (current_size > size_pow2) {
+        // check the childs if anyone available
+        
         int h_left = heap_left(heap_index);
         int h_right = heap_right(heap_index);
+
+        // not enough memory!
+        if (h_left > freelist_size || h_right > freelist_size) {
+            
+            return -1;
+        }
+
+        printf("h_left=%d, h_right=%d\n", h_left, h_right);
+
+        // current chunk is allocated
+        if (freelist[heap_index] == 1 && freelist[h_left] == 0 && freelist[h_right] == 0) {
+            printf("ff\n");
+            return -1; // already allocated!
+        }
 
         int left_allocation_index = __allocate_on_bitmap(size_pow2, h_left, depth + 1);
 
@@ -152,9 +211,8 @@ int __print_heap() {
     printf("\n");
 }
 
-
 void* __heap_index_to_ptr(int heap_index) {
-    int max_depth = segment_size / (0x01 << MIN_MEMORY_POW);
+    const int max_depth = 1 + __log2(segment_size / (0x01 << MIN_MEMORY_POW));
     int index_depth = 0;
     
     int leftmost = 0;
@@ -174,16 +232,35 @@ void* __heap_index_to_ptr(int heap_index) {
     return NULL;    
 }
 
+int __log2(int x) {
+    if (x <= 0) {
+        return -1;
+    }
+
+    int l = 0;
+    int n = 1;
+
+    while (n < x) {
+        l += 1;
+        n *= 2;
+    }
+
+    return l;
+    
+}
+
 int __ptr_to_heap_index(void* ptr) {
     int offset = ptr - segment;
-    const int max_depth = segment_size / (0x01 << MIN_MEMORY_POW);
+    const int max_depth = 1 + __log2(segment_size / (0x01 << MIN_MEMORY_POW));
     int index_offset = 0;
 
     for (size_t depth = 0; depth < max_depth; depth++) {
         int rdepth = max_depth - depth - 1;
         int chunk_size = (0x01 << (MIN_MEMORY_POW + rdepth)); //  for depth this is segmnet size
 
+        // printf("max_depth=%d, pow=%d\n", max_depth, 0x01 << depth);
         if (offset % chunk_size == 0) {
+
             return index_offset + offset / chunk_size;
         }
 
@@ -191,7 +268,6 @@ int __ptr_to_heap_index(void* ptr) {
     }
     return -1;
 }
-
 
 // This will be initialized by one process thus no need for semaphores.
 int sbmem_init(int segsize)
@@ -293,21 +369,17 @@ void *sbmem_alloc(int reqsize)
 {
     sem_wait(&mutex);
 
-    printf("-----------------------\n");
-
     __print_heap();
 
     reqsize = __max(to_multiple_of_two(reqsize), (0x01 << MIN_MEMORY_POW)); // cannot allocate less than 128 bytes!
 
-    printf("req size = %d\n", reqsize);
+    // printf("req size = %d\n", reqsize);
 
     int heap_index = __allocate_on_bitmap(reqsize, 0, 0);
 
-    printf("> allocation result = %d\n", heap_index);
+    // printf("> allocation result = %d\n", heap_index);
 
     __print_heap();
-
-    printf("-----------------------\n");
 
     sem_post(&mutex);
 
@@ -317,21 +389,20 @@ void *sbmem_alloc(int reqsize)
 void sbmem_free(void *ptr)
 {
     sem_wait(&mutex);
-    int temp = freeList_size;
-    int depth = 0;
-    while(temp <= 0){
-        temp = (temp - 1) / 2;
-        depth++;
-    }
-    depth++;
-    int heap_index_to_delete = 0; // input??
-    int heap_index = _deallocate_on_bitmap(heap_index_to_delete, depth);
-
-    printf("> allocation result = %d\n", heap_index);
 
     __print_heap();
 
-    printf("-----------------------\n");
+    int heap_index_to_delete = __ptr_to_heap_index(ptr);
+
+    if (heap_index_to_delete == -1) {
+        return -1;
+    }
+
+    int r = __deallocate_on_bitmap(heap_index_to_delete);
+
+    printf("> free result = %d\n", r);
+
+    __print_heap();
 
 
     sem_post(&mutex);
