@@ -62,6 +62,34 @@ int heap_buddy(int c) {
         return c - 1;
     }
 }
+
+int _deallocate_on_bitmap(int size_pow2, int heap_index, int depth){
+    int current_size = segment_size >> depth;
+
+
+    if(freeList[heap_index] == 0) // already free
+        return -1;
+    else{
+        if(heap_index % 2 == 0){ // if even
+            if(freeList[heap_index - 1] == 0){ // if sibling is also 0
+                // make parent zero
+                freeList[(heap_index - 1) / 2] = 0;
+            }
+        }
+        else{
+            if(freeList[heap_index + 1] == 0){ // if sibling is also 0
+                // make parent zero
+                freeList[(heap_index - 1) / 2] = 0;
+            }
+        }
+        freeList[heap_index] = 0; // free biggest
+        // recursive olmalı
+        return heap_index;
+    }    
+    
+    
+}
+
 // allocate memory on bitmap, size_pow2 is power of two!
 // return the heap index of the allocated chunk
 int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
@@ -289,6 +317,7 @@ void *sbmem_alloc(int reqsize)
 void sbmem_free(void *ptr)
 {
     sem_wait(&mutex);
+    
 
 
 
