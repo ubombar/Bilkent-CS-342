@@ -19,10 +19,25 @@ int main()
     r = sbmem_open();
     printf("sbmem_open() => %d\n", r);
 
-    
+
 
     r = sbmem_close();
     printf("sbmem_close() => %d\n", r);
+
+    pid_t pid = fork();
+
+    if (pid != 0) {
+        void* p = sbmem_alloc(128);
+        printf("p1: sbmem_alloc(128) => %p\n", p);
+        sbmem_free(p);
+
+    } else {
+        void* p = sbmem_alloc(512);
+        printf("p2: sbmem_alloc(512) => %p\n", p);
+        sbmem_free(p);
+    }
+
+
 
 
     // if (ret == -1)
