@@ -134,21 +134,33 @@ void* __heap_index_to_ptr(int heap_index) {
 
     for (size_t depth = 0; depth < max_depth; depth++) {
         if (leftmost >= heap_index && rightmost <= heap_index) {
-            index_depth = depth;
-            break;
+            // offset = CHUNK SIZE IN CURRENT DEPTH * INDEX OFFSET
+            int offset = (segment_size >> depth) * (heap_index - leftmost);
+            return ((char*) segment)[offset];
         }
         leftmost = heap_left(leftmost);
         rightmost = heap_right(rightmost);
     }
 
-    // offset = CHUNK SIZE IN CURRENT DEPTH * INDEX OFFSET
-    int offset = (segment_size >> index_depth) * (heap_index - leftmost);
-
-    return ((char*) segment)[offset];
+    return NULL;    
 }
 
 int __ptr_to_heap_index(void* ptr) {
-    return 0;
+    int offset = ptr - segment;
+    const int max_depth = segment_size / (0x01 << MIN_MEMORY_POW);
+    int index_offset = 0;
+
+    for (size_t depth = 0; depth < max_depth; depth++) {
+        int rdepth = max_depth - depth - 1;
+        int chunk_size = (0x01 << (MIN_MEMORY_POW + rdepth)); //  for depth this is segmnet size
+
+        if (offset % chunk_size == 0) {
+            return index_offset + offset / chunk_size;
+        }
+        
+        index_offset = index_offset + 0x01 << depth;
+    }
+    return -1;
 }
 
 
