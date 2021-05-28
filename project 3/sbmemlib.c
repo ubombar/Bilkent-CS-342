@@ -49,6 +49,19 @@ int heap_right(int c) {
     return 2 * c + 2;
 }
 
+int heap_buddy(int c) {
+    // root cannot have a buddy!
+    if (c == 0) {
+        return -1;
+    }
+
+    // return the buddy
+    if (c % 2 == 1) {
+        return c + 1;
+    } else {
+        return c - 1;
+    }
+}
 // allocate memory on bitmap, size_pow2 is power of two!
 // return the heap index of the allocated chunk
 int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
@@ -63,7 +76,7 @@ int __allocate_on_bitmap(int size_pow2, int heap_index, int depth) {
         // Test if the hole is empty!
 
         if (freelist[heap_index] == 1) {
-            return -1;
+            return -1; // already allocated!
         }
 
         freelist[heap_index] = 1;
@@ -110,6 +123,34 @@ int __print_heap() {
 
     printf("\n");
 }
+
+
+void* __heap_index_to_ptr(int heap_index) {
+    int max_depth = segment_size / (0x01 << MIN_MEMORY_POW);
+    int index_depth = 0;
+    
+    int leftmost = 0;
+    int rightmost = 0;
+
+    for (size_t depth = 0; depth < max_depth; depth++) {
+        if (leftmost >= heap_index && rightmost <= heap_index) {
+            index_depth = depth;
+            break;
+        }
+        leftmost = heap_left(leftmost);
+        rightmost = heap_right(rightmost);
+    }
+
+    // offset = CHUNK SIZE IN CURRENT DEPTH * INDEX OFFSET
+    int offset = (segment_size >> index_depth) * (heap_index - leftmost);
+
+    return ((char*) segment)[offset];
+}
+
+int __ptr_to_heap_index(void* ptr) {
+    return 0;
+}
+
 
 // This will be initialized by one process thus no need for semaphores.
 int sbmem_init(int segsize)
