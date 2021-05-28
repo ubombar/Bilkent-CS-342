@@ -63,7 +63,7 @@ int heap_buddy(int c) {
     }
 }
 
-int _deallocate_on_bitmap(int size_pow2, int heap_index, int depth){
+int _deallocate_on_bitmap(int heap_index, int depth){
     int current_size = segment_size >> depth;
 
 
@@ -317,8 +317,21 @@ void *sbmem_alloc(int reqsize)
 void sbmem_free(void *ptr)
 {
     sem_wait(&mutex);
-    
+    int temp = freeList_size;
+    int depth = 0;
+    while(temp <= 0){
+        temp = (temp - 1) / 2;
+        depth++;
+    }
+    depth++;
+    int heap_index_to_delete = 0; // input??
+    int heap_index = _deallocate_on_bitmap(heap_index_to_delete, depth);
 
+    printf("> allocation result = %d\n", heap_index);
+
+    __print_heap();
+
+    printf("-----------------------\n");
 
 
     sem_post(&mutex);
