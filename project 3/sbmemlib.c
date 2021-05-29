@@ -27,6 +27,14 @@ int freelist_size;
 
 unsigned int num_processes = 0;
 
+typedef struct header_sbmem {
+    int freelist_size;
+    int segmnet_size;
+} header_sbmem;
+
+header_sbmem header;
+
+
 int __log2(int x) {
     if (x <= 0) {
         return -1;
@@ -260,6 +268,7 @@ void* __heap_index_to_ptr(int heap_index) {
     for (size_t depth = 0; depth < max_depth; depth++) {
         if (leftmost <= heap_index && rightmost >= heap_index) {
             // offset = CHUNK SIZE IN CURRENT DEPTH * INDEX OFFSET
+            // printf("(segment_size >> depth)=%d\n", (segment_size >> depth));
             int offset = (segment_size >> depth) * (heap_index - leftmost);
             return segment + offset;
         }
@@ -324,9 +333,10 @@ int sbmem_init(int segsize)
     }
 
     // allocate the free list heap inside the memory segment
-    int free_list_size = (2 * (segsize_c / min_memory_size) - 1);
+    header.freelist_size = (2 * (segsize_c / min_memory_size) - 1);
+    header.segmnet_size = segsize_c;
 
-    int total_size = sizeof(int) + sizeof(char) * free_list_size + segsize_c;
+    int total_size = sizeof(header) + header.freelist_size + segsize_c;
 
     int r = ftruncate(fd, total_size);
     
@@ -345,11 +355,11 @@ int sbmem_init(int segsize)
 
     *((int*) mmap_segmnet) = total_size;
 
-    freelist_size = free_list_size;
-    freelist = mmap_segmnet + sizeof(int);
+    freelist_size = header.freelist_size;
+    freelist = mmap_segmnet + sizeof(header);
 
     segment_size = segsize_c;
-    segment = mmap_segmnet + freelist_size + sizeof(int);
+    segment = mmap_segmnet + (freelist_size + sizeof(header));
 
     sem_init(&mutex, 10, 1);
 
@@ -366,6 +376,8 @@ int sbmem_remove()
 
 int sbmem_open()
 {
+    sbmem_init(32 * 1024 * 1024);
+
     sem_init(&mutex, 10, 1);
 
     sem_wait(&mutex);
@@ -377,8 +389,32 @@ int sbmem_open()
     num_processes += 1;
     sem_post(&mutex);
 
+    // int fd = shm_open("shared_m", O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
     
+    // read(fd, &header, sizeof(header_sbmem));
 
+    // freelist_size = header.freelist_size;
+    // segment_size = header.segmnet_size;
+
+    // printf("freelist_size=%d, segment_size=%d\n", freelist_size, segment_size);
+
+    // // close(fd);
+
+    // // fd = shm_open("shared_m", O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+
+    // int total_size = sizeof(header_sbmem) + freelist_size + segment_size;
+
+    // void* mmap_segmnet = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, sizeof(header_sbmem));
+
+    // if (mmap_segmnet == NULL) {
+    //     return -1;
+    // }
+
+
+    // freelist = mmap_segmnet + sizeof(header_sbmem);
+    // segment = mmap_segmnet + freelist_size + sizeof(header_sbmem);
+
+    // printf("freelist=%p, segment=%p, mmap_segmnet=%p\n", freelist, segment, mmap_segmnet);
     
     return 0;
 }
